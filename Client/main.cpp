@@ -63,22 +63,12 @@ uint16_t KEY_LANALOG_RIGHT, KEY_RANALOG_UP, KEY_RANALOG_DOWN, KEY_RANALOG_LEFT, 
 
 // VJoy
 #ifdef __WIN32__
-# include "VJoySDK/inc/public.h"
-# include "VJoySDK/inc/vjoyinterface.h"
+# define VIGEM_IMPORTS
+# include "ViGEmUM/ViGEmUM.h"
+# include "ViGEmUM/public.h"
 bool VJOY_MODE = false;
 bool VJOY_ALTERNATE = false;
-int VJOY_DEVID = 0;
-
-enum {
-	VJOY_CTRL_SELECT     = 1 << 6,	//!< Select button.
-	VJOY_CTRL_START      = 1 << 7,	//!< Start button.
-	VJOY_CTRL_LBUMPER   = 1 << 4,	//!< Left bumper.
-	VJOY_CTRL_RBUMPER   = 1 << 5,	//!< Right bumper.
-	VJOY_CTRL_TRIANGLE   = 1 << 3,	//!< Triangle button.
-	VJOY_CTRL_CIRCLE     = 1 << 1,	//!< Circle button.
-	VJOY_CTRL_CROSS      = 1 << 0,	//!< Cross button.
-	VJOY_CTRL_SQUARE     = 1 << 2	//!< Square button.
-};
+VIGEM_TARGET* VJOY_DEVID = 0;
 #endif
 
 // VJoy implementation
@@ -86,55 +76,31 @@ enum {
 void abortVjoy()
 {
 	VJOY_MODE = false;
-	VJOY_DEVID = 0;
-	printf("\nERROR: An error occurred while initializing VJOY. Reverting back to keybinds.\n");
+	if (VJOY_DEVID != 0)
+	{
+		delete VJOY_DEVID;
+		VJOY_DEVID = 0;
+	}
+	printf("\nERROR: An error occurred while initializing ViGEm. Reverting back to keybinds.\n");
 }
 void initVjoy()
 {
-	if (!vJoyEnabled())
-	{
-		abortVjoy();
-		return;
-	}
-	for (UINT devId = 1; devId <= 16; devId++)
-	{
-		if (VJD_STAT_FREE == GetVJDStatus(devId))
-		{
-			if (8 > GetVJDButtonNumber(devId))
-			{
-				printf("VJOY: ID:%u Buttons number insuffisent.\n", devId);
-				continue;
-			}
-			if (!GetVJDAxisExist(devId, HID_USAGE_X) || 
-				!GetVJDAxisExist(devId, HID_USAGE_Y) || 
-				!GetVJDAxisExist(devId, HID_USAGE_Z) || 
-				!GetVJDAxisExist(devId, HID_USAGE_RX) || 
-				!GetVJDAxisExist(devId, HID_USAGE_RY) || 
-				!GetVJDAxisExist(devId, HID_USAGE_RZ) || 
-				!GetVJDAxisExist(devId, HID_USAGE_SL0) || 
-				!GetVJDAxisExist(devId, HID_USAGE_SL1) || 
-				!GetVJDAxisExist(devId, HID_USAGE_WHL) || 
-				!GetVJDAxisExist(devId, HID_USAGE_POV))
-			{
-				printf("VJOY: ID:%u Some axis not defined.\n", devId);
-				continue;
-			}
-			VJOY_DEVID = devId;
-			break;
-		}
-		else
-		{
-			printf("VJOY: ID:%u Not ready, status:%u.\n", devId, GetVJDStatus(devId));
-		}
-	}
-	
-	if (0 == VJOY_DEVID || !AcquireVJD(VJOY_DEVID))
+	if (!VIGEM_SUCCESS(vigem_init()))
 	{
 		abortVjoy();
 		return;
 	}
 	
-	printf("Acquired ID:%u VJOY device.\n", VJOY_DEVID);
+	VJOY_DEVID = new VIGEM_TARGET;
+    VIGEM_TARGET_INIT(VJOY_DEVID);
+	
+	if (!VIGEM_SUCCESS(vigem_target_plugin(Xbox360Wired, VJOY_DEVID)))
+    {
+        abortVjoy();
+		return;
+    }
+	
+	printf("Plugged in ViGEm device.\n");	
 }
 #endif
 
@@ -534,8 +500,8 @@ int main(int argc,char** argv){
 	PadPacket data;
 	PadPacket olddata;
 	#ifdef __WIN32__
-	JOYSTICK_POSITION_V2 joystickData;
-	JOYSTICK_POSITION_V2 joystickDataOld;
+	XUSB_REPORT joystickData = {0};
+	XUSB_REPORT joystickDataOld = {0};
 	#endif
 
 	for (;;){
@@ -558,114 +524,101 @@ int main(int argc,char** argv){
 		if (firstScan){
 			firstScan = 0;
 			memcpy(&olddata,&data,sizeof(PadPacket));
-			#ifdef __WIN32__
-			memcpy(&joystickDataOld,&joystickData,sizeof(JOYSTICK_POSITION_V2));
-			#endif
 		}
 
 		if (count != 0){
 			#ifdef __WIN32__
 			if (VJOY_MODE)
-			{				
-				joystickData.bDevice = VJOY_DEVID;
-				joystickData.wAxisZ = 16384;
-				joystickData.wAxisZRot = 16384;
-				joystickData.wSlider = 16384;
+			{
+				joystickData.wButtons = 0;
+				joystickData.bRightTrigger = 0;
+				joystickData.bLeftTrigger = 0;
 				
-				LONG buttons = 0;
 				if (data.buttons & SCE_CTRL_LEFT)
 				{
-					joystickData.wAxisZRot = 0;
+					joystickData.wButtons = joystickData.wButtons | XUSB_GAMEPAD_DPAD_LEFT;
 				}
-				else if (data.buttons & SCE_CTRL_RIGHT)
+				if (data.buttons & SCE_CTRL_RIGHT)
 				{
-					joystickData.wAxisZRot = 32768;
+					joystickData.wButtons = joystickData.wButtons | XUSB_GAMEPAD_DPAD_RIGHT;
 				}
 				if (data.buttons & SCE_CTRL_UP)
 				{
-					joystickData.wSlider = 32768;
+					joystickData.wButtons = joystickData.wButtons | XUSB_GAMEPAD_DPAD_UP;
 				}
-				else if (data.buttons & SCE_CTRL_DOWN)
+				if (data.buttons & SCE_CTRL_DOWN)
 				{
-					joystickData.wSlider = 0;
+					joystickData.wButtons = joystickData.wButtons | XUSB_GAMEPAD_DPAD_DOWN;
 				}
 				if (data.buttons & SCE_CTRL_TRIANGLE)
 				{
-					buttons = buttons | VJOY_CTRL_TRIANGLE;
+					joystickData.wButtons = joystickData.wButtons | XUSB_GAMEPAD_Y;
 				}
 				if (data.buttons & SCE_CTRL_SQUARE)
 				{
-					buttons = buttons | VJOY_CTRL_SQUARE;
+					joystickData.wButtons = joystickData.wButtons | XUSB_GAMEPAD_X;
 				}
 				if (data.buttons & SCE_CTRL_CROSS)
 				{
-					buttons = buttons | VJOY_CTRL_CROSS;
+					joystickData.wButtons = joystickData.wButtons | XUSB_GAMEPAD_A;
 				}
 				if (data.buttons & SCE_CTRL_CIRCLE)
 				{
-					buttons = buttons | VJOY_CTRL_CIRCLE;
+					joystickData.wButtons = joystickData.wButtons | XUSB_GAMEPAD_B;
 				}
 				if (data.buttons & SCE_CTRL_RTRIGGER)
 				{
-					joystickData.wAxisZ = 0;
-					//SetAxis(32768, VJOY_DEVID, HID_USAGE_WHL);
-				}
-				else
-				{
-					//SetAxis(16384, VJOY_DEVID, HID_USAGE_WHL);
+					joystickData.bRightTrigger = 255;
 				}
 				if (data.buttons & SCE_CTRL_LTRIGGER)
 				{
-					joystickData.wAxisZ = 32768;
+					joystickData.bLeftTrigger = 255;
 				}
 				if (data.buttons & SCE_CTRL_START)
 				{
-					buttons = buttons | VJOY_CTRL_START;
+					joystickData.wButtons = joystickData.wButtons | XUSB_GAMEPAD_START;
 				}
 				if (data.buttons & SCE_CTRL_SELECT)
 				{
-					buttons = buttons | VJOY_CTRL_SELECT;
+					joystickData.wButtons = joystickData.wButtons | XUSB_GAMEPAD_BACK;
 				}
 				if (VJOY_ALTERNATE)
 				{
 					if (data.rx < 70)
 					{
-						buttons = buttons | VJOY_CTRL_LBUMPER;
+						joystickData.wButtons = joystickData.wButtons | XUSB_GAMEPAD_LEFT_SHOULDER;
 					}
 					else if (data.rx > 180)
 					{
-						buttons = buttons | VJOY_CTRL_RBUMPER;
+						joystickData.wButtons = joystickData.wButtons | XUSB_GAMEPAD_RIGHT_SHOULDER;
 					}
-					joystickData.wAxisXRot = 16384;
-					joystickData.wAxisYRot = 16384;
 				}
 				else
 				{
 					if (data.click & MOUSE_MOV && data.tx < SCREEN_WIDTH/2)
 					{
-						buttons = buttons | VJOY_CTRL_LBUMPER;
+						joystickData.wButtons = joystickData.wButtons | XUSB_GAMEPAD_LEFT_SHOULDER;
 					}
 					if (data.click & MOUSE_MOV && data.tx > SCREEN_WIDTH/2)
 					{
-						buttons = buttons | VJOY_CTRL_RBUMPER;
+						joystickData.wButtons = joystickData.wButtons | XUSB_GAMEPAD_RIGHT_SHOULDER;
 					}
-					joystickData.wAxisXRot = data.rx*128;
-					joystickData.wAxisYRot = data.ry*128;
+					joystickData.sThumbRX = (data.rx-128)*256;
+					joystickData.sThumbRY = (data.ry-127)*-256;
 				}
-				joystickData.lButtons = buttons;
-				joystickData.wAxisX = data.lx*128;
-				joystickData.wAxisY = data.ly*128;
+
+				joystickData.sThumbLX = (data.lx-128)*256;
+				joystickData.sThumbLY = (data.ly-127)*-256;
 				
-				if (0 != memcmp(&joystickDataOld, &joystickData, sizeof(JOYSTICK_POSITION_V2)))
+				if (0 != memcmp(&joystickDataOld, &joystickData, sizeof(XUSB_REPORT)))
 				{
-					PVOID pJoystickData = (PVOID)(&joystickData);
-					if (!UpdateVJD(VJOY_DEVID, pJoystickData))
+					if (!VIGEM_SUCCESS(vigem_xusb_submit_report(*VJOY_DEVID, joystickData)))
 					{
-						printf("\nERROR: Feeding VJOY failed, please restart the app\n");
+						printf("\nERROR: Feeding ViGEm failed, please restart the app\n");
 						abortVjoy();
 					}
 					
-					memcpy(&joystickDataOld,&joystickData,sizeof(JOYSTICK_POSITION_V2));
+					memcpy(&joystickDataOld,&joystickData,sizeof(XUSB_REPORT));
 				}
 			}
 			if (!VJOY_MODE)
